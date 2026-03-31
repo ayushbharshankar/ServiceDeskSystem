@@ -1,0 +1,20 @@
+import { useEffect, useState } from 'react'
+
+/**
+ * @param {string} query CSS media query, e.g. '(min-width: 768px)'
+ */
+export function useMediaQuery(query) {
+  const [matches, setMatches] = useState(() =>
+    typeof window !== 'undefined' ? window.matchMedia(query).matches : false,
+  )
+
+  useEffect(() => {
+    const m = window.matchMedia(query)
+    const onChange = () => setMatches(m.matches)
+    m.addEventListener('change', onChange)
+    setMatches(m.matches)
+    return () => m.removeEventListener('change', onChange)
+  }, [query])
+
+  return matches
+}
