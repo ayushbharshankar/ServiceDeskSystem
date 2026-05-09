@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useLocation, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { authService } from '../services/authService'
 import { cn } from '../utils/cn'
@@ -244,7 +244,17 @@ export default function Login() {
             </form>
           </div>
 
-          <p className="mt-8 text-center text-xs text-slate-500">
+          <p className="mt-6 text-center text-sm text-slate-400">
+            Don&apos;t have an account?{' '}
+            <Link
+              to="/register"
+              className="font-medium text-indigo-400 transition hover:text-indigo-300 focus:outline-none focus-visible:underline"
+            >
+              Sign up
+            </Link>
+          </p>
+
+          <p className="mt-4 text-center text-xs text-slate-500">
             By continuing you agree to your organization&apos;s access policies.
           </p>
         </div>
