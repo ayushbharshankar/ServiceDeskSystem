@@ -54,9 +54,18 @@ export const issueService = {
     return api.put(`/issues/${id}`, transformIssuePayload(payload)).then((r) => r.data)
   },
 
+  /**
+   * Update only the status. Accepts either DB enum value directly
+   * (e.g. "To Do", "In Progress", "Done") or normalized value.
+   * @param {string|number} id
+   * @param {string} status
+   */
   updateStatus(id, status) {
+    // If it's already a DB enum value, send directly; otherwise denormalize
+    const dbStatuses = ['To Do', 'In Progress', 'Done']
+    const dbStatus = dbStatuses.includes(status) ? status : denormalizeStatus(status)
     return api
-      .patch(`/issues/${id}/status`, { status: denormalizeStatus(status) })
+      .patch(`/issues/${id}/status`, { status: dbStatus })
       .then((r) => r.data)
   },
 

@@ -1,9 +1,8 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import { issueService } from '../../services/issueService'
-import { userService } from '../../services/userService'
+import { projectService } from '../../services/projectService'
 import { PRIORITIES, STATUSES } from '../../constants/issues'
 import { getErrorMessage } from '../../utils/errorMessage'
-import { normalizeUsers } from '../../utils/normalize'
 import { cn } from '../../utils/cn'
 import { rawIssueId, toFormState } from '../../utils/issueHelpers'
 
@@ -32,7 +31,7 @@ export default function IssueFormModal({
   const [priority, setPriority] = useState('medium')
   const [status, setStatus] = useState('pending')
   const [assigneeId, setAssigneeId] = useState('')
-  const [users, setUsers] = useState([])
+  const [members, setMembers] = useState([])
   const [errors, setErrors] = useState({})
   const [formError, setFormError] = useState('')
   const [submitting, setSubmitting] = useState(false)
@@ -59,21 +58,30 @@ export default function IssueFormModal({
     return () => cancelAnimationFrame(t)
   }, [open, mode, initialIssue])
 
+  // Fetch project members instead of all users
   useEffect(() => {
-    if (!open) return
+    if (!open || !projectId) return
     let cancelled = false
     ;(async () => {
       try {
-        const data = await userService.list()
-        if (!cancelled) setUsers(normalizeUsers(data))
+        const data = await projectService.getMembers(projectId)
+        if (!cancelled) {
+          const membersList = (data.members || []).map((m) => ({
+            id: m.user_id,
+            name: m.full_name,
+            email: m.email,
+            role: m.member_role,
+          }))
+          setMembers(membersList)
+        }
       } catch {
-        if (!cancelled) setUsers([])
+        if (!cancelled) setMembers([])
       }
     })()
     return () => {
       cancelled = true
     }
-  }, [open])
+  }, [open, projectId])
 
   useEffect(() => {
     if (!open) return
@@ -180,7 +188,7 @@ export default function IssueFormModal({
                 if (errors.title) setErrors((p) => ({ ...p, title: undefined }))
               }}
               className={cn(
-                'w-full rounded-xl border px-3 py-2.5 text-slate-900 outline-none focus:ring-2',
+                'w-full rounded-xl border px-3 py-2.5 text-slate-900 outline-none transition focus:ring-2',
                 errors.title
                   ? 'border-red-400 focus:border-red-500 focus:ring-red-200'
                   : 'border-slate-300 focus:border-indigo-500 focus:ring-indigo-500/20',
@@ -199,7 +207,7 @@ export default function IssueFormModal({
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               rows={3}
-              className="w-full resize-y rounded-xl border border-slate-300 px-3 py-2.5 text-slate-900 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20"
+              className="w-full resize-y rounded-xl border border-slate-300 px-3 py-2.5 text-slate-900 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20"
               placeholder="Steps, context, acceptance criteria…"
             />
           </div>
@@ -213,7 +221,7 @@ export default function IssueFormModal({
                 id="issue-priority"
                 value={priority}
                 onChange={(e) => setPriority(e.target.value)}
-                className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-slate-900 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20"
+                className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-slate-900 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20"
               >
                 {PRIORITIES.map((p) => (
                   <option key={p.value} value={p.value}>
@@ -230,7 +238,7 @@ export default function IssueFormModal({
                 id="issue-status"
                 value={status}
                 onChange={(e) => setStatus(e.target.value)}
-                className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-slate-900 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20"
+                className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-slate-900 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20"
               >
                 {STATUSES.map((s) => (
                   <option key={s.value} value={s.value}>
@@ -243,22 +251,22 @@ export default function IssueFormModal({
 
           <div>
             <label htmlFor="issue-assignee" className="mb-1.5 block text-sm font-medium text-slate-700">
-              Assigned user
+              Assign to
             </label>
-            {users.length > 0 ? (
+            {members.length > 0 ? (
               <select
                 id="issue-assignee"
                 value={assigneeId}
                 onChange={(e) => setAssigneeId(e.target.value)}
-                className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-slate-900 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20"
+                className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-slate-900 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20"
               >
                 <option value="">Unassigned</option>
-                {users.map((u, i) => {
-                  const uid = String(u.id ?? u._id ?? i)
-                  const label = u.name ?? u.email ?? u.username ?? uid
+                {members.map((u) => {
+                  const uid = String(u.id)
+                  const label = u.name || u.email || uid
                   return (
                     <option key={uid} value={uid}>
-                      {label}
+                      {label}{u.role ? ` (${u.role})` : ''}
                     </option>
                   )
                 })}
@@ -268,24 +276,25 @@ export default function IssueFormModal({
                 id="issue-assignee"
                 value={assigneeId}
                 onChange={(e) => setAssigneeId(e.target.value)}
-                className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-slate-900 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20"
-                placeholder="User ID (optional, if /users is unavailable)"
+                className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-slate-900 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20"
+                placeholder="User ID (optional)"
               />
             )}
+            <p className="mt-1 text-[11px] text-slate-400">Only project members can be assigned.</p>
           </div>
 
           <div className="flex flex-col-reverse gap-2 border-t border-slate-100 pt-4 sm:flex-row sm:justify-end">
             <button
               type="button"
               onClick={onClose}
-              className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={submitting}
-              className="rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-60"
+              className="rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-700 disabled:opacity-60"
             >
               {submitting ? 'Saving…' : mode === 'create' ? 'Create issue' : 'Save changes'}
             </button>

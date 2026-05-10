@@ -5,7 +5,6 @@ import { protect } from '../middleware/auth.middleware.js';
 
 const router = Express.Router();
 
-// All comment routes require auth
 router.use(protect);
 
 router.post('/',       addComment);

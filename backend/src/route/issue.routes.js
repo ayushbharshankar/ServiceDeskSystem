@@ -9,7 +9,6 @@ import { protect } from '../middleware/auth.middleware.js';
 
 const router = Express.Router();
 
-// All issue routes require auth
 router.use(protect);
 
 router.get('/my-tasks', getMyTasks);       // Must be before /:id

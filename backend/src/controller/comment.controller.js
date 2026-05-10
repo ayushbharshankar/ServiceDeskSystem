@@ -1,7 +1,7 @@
 
 import pool from '../db.js';
+import { createNotification, logActivity } from './notification.controller.js';
 
-// ── POST /api/comments — Add comment to issue ────────────────────────
 const addComment = async (req, res) => {
   try {
     const { issue_id, comment_text } = req.body;
@@ -10,8 +10,10 @@ const addComment = async (req, res) => {
       return res.status(400).json({ message: 'issue_id and comment_text are required' });
     }
 
-    // Verify issue exists
-    const issue = await pool.query('SELECT issue_id FROM issues WHERE issue_id = $1', [issue_id]);
+    const issue = await pool.query(
+      'SELECT issue_id, title, project_id, assigned_to, created_by FROM issues WHERE issue_id = $1',
+      [issue_id]
+    );
     if (issue.rows.length === 0) {
       return res.status(404).json({ message: 'Issue not found' });
     }
@@ -26,6 +28,43 @@ const addComment = async (req, res) => {
     // Return with author name
     const comment = rows[0];
     comment.author_name = req.user.full_name;
+
+    const issueData = issue.rows[0];
+
+    // Notify assigned user (if not the commenter)
+    if (issueData.assigned_to && issueData.assigned_to !== req.user.user_id) {
+      await createNotification({
+        userId: issueData.assigned_to,
+        type: 'comment_added',
+        title: 'New comment',
+        message: `${req.user.full_name} commented on "${issueData.title}"`,
+        link: `/issue/${issue_id}`,
+        metadata: { issue_id: parseInt(issue_id), comment_id: comment.comment_id },
+      });
+    }
+
+    // Notify issue creator (if different from commenter and assignee)
+    if (issueData.created_by &&
+        issueData.created_by !== req.user.user_id &&
+        issueData.created_by !== issueData.assigned_to) {
+      await createNotification({
+        userId: issueData.created_by,
+        type: 'comment_added',
+        title: 'New comment',
+        message: `${req.user.full_name} commented on "${issueData.title}"`,
+        link: `/issue/${issue_id}`,
+        metadata: { issue_id: parseInt(issue_id), comment_id: comment.comment_id },
+      });
+    }
+
+    await logActivity({
+      projectId: issueData.project_id,
+      userId: req.user.user_id,
+      action: 'comment_added',
+      entityType: 'comment',
+      entityId: comment.comment_id,
+      details: { issue_title: issueData.title, comment_preview: comment_text.slice(0, 100) },
+    });
 
     res.status(201).json({ message: 'Comment added', comment });
   } catch (error) {

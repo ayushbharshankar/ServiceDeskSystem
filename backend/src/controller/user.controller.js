@@ -2,7 +2,6 @@
 import bcrypt from 'bcryptjs';
 import pool from '../db.js';
 
-// ── GET /api/users — List all users ──────────────────────────────────
 const getAllUsers = async (req, res) => {
   try {
     const { rows } = await pool.query(
@@ -15,7 +14,6 @@ const getAllUsers = async (req, res) => {
   }
 };
 
-// ── GET /api/users/:id — Get single user ─────────────────────────────
 const getUserById = async (req, res) => {
   try {
     const { id } = req.params;
@@ -33,7 +31,6 @@ const getUserById = async (req, res) => {
   }
 };
 
-// ── PUT /api/users/:id — Update user (admin) ─────────────────────────
 const updateUser = async (req, res) => {
   try {
     const { id } = req.params;
@@ -77,7 +74,6 @@ const updateUser = async (req, res) => {
   }
 };
 
-// ── DELETE /api/users/:id — Remove user (admin) ──────────────────────
 const deleteUser = async (req, res) => {
   try {
     const { id } = req.params;

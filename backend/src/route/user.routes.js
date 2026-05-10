@@ -5,7 +5,6 @@ import { protect, authorize } from '../middleware/auth.middleware.js';
 
 const router = Express.Router();
 
-// All user management routes require auth
 router.use(protect);
 
 router.get('/',     authorize('Admin', 'Manager'), getAllUsers);

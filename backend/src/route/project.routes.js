@@ -3,23 +3,33 @@ import Express from 'express';
 import {
   createProject, getAllProjects, getProjectById,
   updateProject, deleteProject,
-  addMember, removeMember,
+  addMember, removeMember, getMembers,
+  inviteMember, cancelInvitation,
+  getProjectActivity, getProjectDashboard,
 } from '../controller/project.controller.js';
 import { protect, authorize } from '../middleware/auth.middleware.js';
 
 const router = Express.Router();
 
-// All project routes require auth
 router.use(protect);
 
-router.post('/',   authorize('Admin', 'Manager'), createProject);
+router.post('/',   createProject);
 router.get('/',    getAllProjects);
 router.get('/:id', getProjectById);
-router.put('/:id', authorize('Admin', 'Manager'), updateProject);
-router.delete('/:id', authorize('Admin'),          deleteProject);
+router.put('/:id', updateProject);
+router.delete('/:id', deleteProject);
 
-// Member management
-router.post('/:id/members',          authorize('Admin', 'Manager'), addMember);
-router.delete('/:id/members/:userId', authorize('Admin', 'Manager'), removeMember);
+// Members
+router.get('/:id/members',             getMembers);
+router.post('/:id/members',            addMember);
+router.delete('/:id/members/:userId',  removeMember);
+
+// Invitations
+router.post('/:id/invite',                        inviteMember);
+router.delete('/:id/invitations/:invitationId',    cancelInvitation);
+
+// Activity & Dashboard
+router.get('/:id/activity',   getProjectActivity);
+router.get('/:id/dashboard',  getProjectDashboard);
 
 export default router;

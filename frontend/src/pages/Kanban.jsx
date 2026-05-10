@@ -1,20 +1,23 @@
 import {
-  closestCorners,
   DndContext,
   DragOverlay,
   PointerSensor,
+  TouchSensor,
+  rectIntersection,
   useDraggable,
   useDroppable,
   useSensor,
   useSensors,
 } from '@dnd-kit/core'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, useCallback } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import ErrorBanner from '../components/ui/ErrorBanner'
 import PageHeader from '../components/ui/PageHeader'
 import { useIssuesList } from '../hooks/useIssuesList'
-import { useProjectsList } from '../hooks/useProjectsList'
+import { useProjects } from '../context/ProjectsContext'
+import { useAuth } from '../context/AuthContext'
 import { issueService } from '../services/issueService'
+import { useToast } from '../context/ToastContext'
 import { getErrorMessage } from '../utils/errorMessage'
 import {
   assigneeLabel,
@@ -27,9 +30,9 @@ import { cn } from '../utils/cn'
 const COLUMN_IDS = ['todo', 'in_progress', 'done']
 
 const COLUMN_META = {
-  todo: { title: 'To Do', apiStatus: 'pending' },
-  in_progress: { title: 'In Progress', apiStatus: 'in_progress' },
-  done: { title: 'Done', apiStatus: 'completed' },
+  todo: { title: 'To Do', dbStatus: 'To Do', color: 'text-slate-600', dot: 'bg-slate-400' },
+  in_progress: { title: 'In Progress', dbStatus: 'In Progress', color: 'text-blue-600', dot: 'bg-blue-500' },
+  done: { title: 'Done', dbStatus: 'Done', color: 'text-emerald-600', dot: 'bg-emerald-500' },
 }
 
 const DRAG_PREFIX = 'issue:'
@@ -44,10 +47,12 @@ function parseIssueIdFromDrag(dragIdValue) {
   return s.startsWith(DRAG_PREFIX) ? s.slice(DRAG_PREFIX.length) : null
 }
 
+/** Maps ANY status string to a column key */
 function statusToColumn(status) {
-  const s = String(status ?? '').toLowerCase().replace(/\s+/g, '_')
-  if (s === 'completed' || s === 'done' || s === 'closed') return 'done'
-  if (s === 'in_progress' || s === 'inprogress') return 'in_progress'
+  if (!status) return 'todo'
+  const s = String(status).toLowerCase().replace(/[\s_-]+/g, '')
+  if (s === 'done' || s === 'completed' || s === 'closed') return 'done'
+  if (s === 'inprogress') return 'in_progress'
   return 'todo'
 }
 
@@ -60,33 +65,32 @@ function partitionIssues(issues) {
   return columns
 }
 
-function resolveDropColumn(overId, columns) {
-  if (overId == null) return null
-  const id = String(overId)
-  if (COLUMN_IDS.includes(id)) return id
-  const issueFromDrag = parseIssueIdFromDrag(id)
-  if (issueFromDrag) {
-    for (const col of COLUMN_IDS) {
-      if (columns[col].some((i) => String(rawIssueId(i)) === issueFromDrag)) {
-        return col
-      }
-    }
-  }
-  return null
+/** Check if user can update this issue's status */
+function canUserUpdateStatus(issue, userId, userRole) {
+  if (!userId) return false
+  if (userRole === 'Admin') return true
+  const assignedTo = issue.assigned_to ?? issue.assignedTo
+  if (assignedTo != null && String(assignedTo) === String(userId)) return true
+  // Project owners/admins — we allow drag for all, backend will enforce
+  // For now, if they are NOT the assignee, show a visual hint
+  return false
 }
 
-function findIssueColumn(columns, issueIdStr) {
-  for (const col of COLUMN_IDS) {
-    if (columns[col].some((i) => String(rawIssueId(i)) === issueIdStr)) return col
-  }
-  return null
+/**
+ * Custom collision detection that only considers column droppables.
+ */
+function columnsOnlyCollision(args) {
+  const columnContainers = args.droppableContainers.filter((container) =>
+    COLUMN_IDS.includes(String(container.id)),
+  )
+  return rectIntersection({ ...args, droppableContainers: columnContainers })
 }
 
 function IssueDragPreview({ issue }) {
   const who = assigneeLabel(issue)
   const assigneeDisplay = who === '—' ? 'Unassigned' : who
   return (
-    <div className="cursor-grabbing rounded-xl border border-slate-200 bg-white p-3 shadow-xl ring-2 ring-indigo-400/50">
+    <div className="w-64 cursor-grabbing rounded-xl border border-indigo-200 bg-white p-3 shadow-2xl ring-2 ring-indigo-400/40">
       <p className="text-sm font-semibold leading-snug text-slate-900">{issue.title ?? 'Untitled'}</p>
       <div className="mt-2 flex flex-wrap items-center gap-2">
         <span
@@ -105,32 +109,57 @@ function IssueDragPreview({ issue }) {
   )
 }
 
-function DraggableIssueCard({ issue, columnId }) {
+function DraggableIssueCard({ issue, columnId, canDrag }) {
   const id = dragId(issue)
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id,
     data: { type: 'issue', issue, sourceColumn: columnId },
+    disabled: !canDrag,
   })
 
   const style = transform
-    ? { transform: `translate3d(${transform.x}px,${transform.y}px,0)` }
+    ? {
+        transform: `translate3d(${transform.x}px,${transform.y}px,0)`,
+        zIndex: isDragging ? 999 : undefined,
+      }
     : undefined
 
   const who = assigneeLabel(issue)
   const assigneeDisplay = who === '—' ? 'Unassigned' : who
+  const navigate = useNavigate()
 
   return (
     <div
       ref={setNodeRef}
       style={style}
       className={cn(
-        'cursor-grab touch-none rounded-xl border border-slate-200 bg-white p-3 shadow-sm active:cursor-grabbing',
-        isDragging && 'opacity-50',
+        'group rounded-xl border border-slate-200 bg-white p-3 shadow-sm transition-all duration-150',
+        canDrag && 'cursor-grab touch-none active:cursor-grabbing',
+        !canDrag && 'cursor-default',
+        isDragging && 'scale-[1.02] opacity-30 shadow-lg ring-2 ring-indigo-300',
+        !isDragging && canDrag && 'hover:border-slate-300 hover:shadow-md',
       )}
-      {...listeners}
-      {...attributes}
+      {...(canDrag ? listeners : {})}
+      {...(canDrag ? attributes : {})}
+      title={!canDrag ? 'Only the assigned user can update this issue' : undefined}
     >
-      <p className="text-sm font-semibold leading-snug text-slate-900">{issue.title ?? 'Untitled'}</p>
+      <div className="flex items-start justify-between gap-2">
+        <p
+          className="flex-1 text-sm font-semibold leading-snug text-slate-900 group-hover:text-indigo-700 cursor-pointer"
+          onClick={(e) => {
+            e.stopPropagation()
+            const issueId = rawIssueId(issue)
+            if (issueId != null) navigate(`/issue/${issueId}`)
+          }}
+        >
+          {issue.title ?? 'Untitled'}
+        </p>
+        {!canDrag && (
+          <svg className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" title="Locked">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+          </svg>
+        )}
+      </div>
       <div className="mt-2 flex flex-wrap items-center gap-2">
         <span
           className={cn(
@@ -148,7 +177,7 @@ function DraggableIssueCard({ issue, columnId }) {
   )
 }
 
-function KanbanColumn({ columnId, title, issues }) {
+function KanbanColumn({ columnId, title, issues, dotColor, userId, userRole }) {
   const { setNodeRef, isOver } = useDroppable({
     id: columnId,
     data: { type: 'column', columnId },
@@ -156,17 +185,20 @@ function KanbanColumn({ columnId, title, issues }) {
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-      <div className="mb-3 flex items-center justify-between px-1">
+      <div className="mb-3 flex items-center gap-2 px-1">
+        <span className={cn('h-2.5 w-2.5 rounded-full', dotColor)} />
         <h2 className="text-sm font-semibold text-slate-800">{title}</h2>
-        <span className="rounded-full bg-slate-200/80 px-2 py-0.5 text-xs font-medium text-slate-600">
+        <span className="ml-auto rounded-full bg-slate-200/80 px-2 py-0.5 text-xs font-medium text-slate-600">
           {issues.length}
         </span>
       </div>
       <div
         ref={setNodeRef}
         className={cn(
-          'flex min-h-[min(60vh,420px)] flex-1 flex-col gap-2 rounded-2xl border-2 border-dashed p-2 transition-colors sm:min-h-[min(70vh,520px)]',
-          isOver ? 'border-indigo-400 bg-indigo-50/40' : 'border-slate-200 bg-slate-50/50',
+          'flex min-h-[min(60vh,420px)] flex-1 flex-col gap-2.5 rounded-2xl border-2 p-2.5 transition-all duration-200 sm:min-h-[min(70vh,520px)]',
+          isOver
+            ? 'border-indigo-400 bg-indigo-50/60 shadow-inner shadow-indigo-100'
+            : 'border-dashed border-slate-200 bg-slate-50/40',
         )}
       >
         {issues.map((issue, index) => (
@@ -174,10 +206,16 @@ function KanbanColumn({ columnId, title, issues }) {
             key={String(rawIssueId(issue) ?? index)}
             issue={issue}
             columnId={columnId}
+            canDrag={canUserUpdateStatus(issue, userId, userRole)}
           />
         ))}
         {issues.length === 0 ? (
-          <p className="m-auto text-center text-xs text-slate-400">Drop issues here</p>
+          <div className="m-auto flex flex-col items-center gap-1 py-8">
+            <svg className="h-8 w-8 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+            </svg>
+            <p className="text-center text-xs text-slate-400">Drop issues here</p>
+          </div>
         ) : null}
       </div>
     </div>
@@ -187,10 +225,15 @@ function KanbanColumn({ columnId, title, issues }) {
 export default function Kanban() {
   const { projectId: projectIdParam } = useParams()
   const navigate = useNavigate()
+  const toast = useToast()
+  const { user } = useAuth()
   const projectId = projectIdParam ?? ''
 
+  const userId = user?.user_id ?? user?.id ?? user?._id
+  const userRole = user?.role
+
   const { projects, loading: loadingProjects, error: projectsError, refetch: refetchProjects } =
-    useProjectsList()
+    useProjects()
   const {
     issues,
     loading: loadingIssues,
@@ -201,11 +244,13 @@ export default function Kanban() {
 
   const columns = useMemo(() => partitionIssues(issues), [issues])
   const [activeIssue, setActiveIssue] = useState(null)
-  const [dragError, setDragError] = useState('')
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
-      activationConstraint: { distance: 8 },
+      activationConstraint: { distance: 5 },
+    }),
+    useSensor(TouchSensor, {
+      activationConstraint: { delay: 200, tolerance: 5 },
     }),
   )
 
@@ -220,9 +265,10 @@ export default function Kanban() {
 
   const listError = projectsError || issuesError
 
-  async function handleDragEnd(event) {
+  const handleDragEnd = useCallback(async (event) => {
     const { active, over } = event
     setActiveIssue(null)
+
     if (!over) return
 
     const draggedIssueId = parseIssueIdFromDrag(active.id)
@@ -231,38 +277,53 @@ export default function Kanban() {
     const sourceColumn = active.data.current?.sourceColumn
     if (!sourceColumn || !COLUMN_IDS.includes(sourceColumn)) return
 
-    const targetColumn = resolveDropColumn(over.id, columns)
+    const targetColumn = COLUMN_IDS.includes(String(over.id)) ? String(over.id) : null
     if (!targetColumn || targetColumn === sourceColumn) return
 
-    const newStatus = COLUMN_META[targetColumn].apiStatus
+    const newDbStatus = COLUMN_META[targetColumn].dbStatus
 
-    setDragError('')
+    // Optimistic update
+    const prevIssues = [...issues]
     setIssues((prev) =>
-      prev.map((i) => (String(rawIssueId(i)) === draggedIssueId ? { ...i, status: newStatus } : i)),
+      prev.map((i) =>
+        String(rawIssueId(i)) === draggedIssueId
+          ? { ...i, status: newDbStatus }
+          : i,
+      ),
     )
 
     try {
-      await issueService.update(draggedIssueId, { status: newStatus })
+      await issueService.updateStatus(draggedIssueId, newDbStatus)
+      toast.success('Status updated', `Moved to ${COLUMN_META[targetColumn].title}`)
     } catch (err) {
-      setDragError(getErrorMessage(err, 'Could not update issue status.'))
-      refetchIssues()
+      // Rollback on failure
+      setIssues(prevIssues)
+      const msg = err.response?.data?.message || getErrorMessage(err, 'Could not update issue status.')
+      const isForbidden = err.response?.status === 403
+      toast.error(
+        isForbidden ? 'Permission denied' : 'Update failed',
+        msg,
+      )
     }
-  }
+  }, [issues, setIssues, toast])
 
   function handleDragStart(event) {
     const id = parseIssueIdFromDrag(event.active.id)
     if (!id) return
-    const col = findIssueColumn(columns, id)
-    if (!col) return
-    const issue = columns[col].find((i) => String(rawIssueId(i)) === id)
-    setActiveIssue(issue ?? null)
+    for (const col of COLUMN_IDS) {
+      const issue = columns[col].find((i) => String(rawIssueId(i)) === id)
+      if (issue) {
+        setActiveIssue(issue)
+        return
+      }
+    }
   }
 
   return (
     <div className="flex min-h-0 flex-1 flex-col space-y-6">
       <PageHeader
         title="Kanban board"
-        description="Drag cards between columns. Status updates are saved to the server when you drop."
+        description="Drag cards between columns to update status."
         actions={
           <button
             type="button"
@@ -271,7 +332,7 @@ export default function Kanban() {
               refetchIssues()
             }}
             disabled={loadingIssues || !projectId || loadingProjects}
-            className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50 disabled:opacity-50"
+            className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:opacity-50"
           >
             Refresh
           </button>
@@ -287,7 +348,7 @@ export default function Kanban() {
           value={projectId}
           onChange={(e) => navigate(`/kanban/${e.target.value}`)}
           disabled={loadingProjects || projects.length === 0}
-          className="w-full max-w-md rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 disabled:opacity-60"
+          className="w-full max-w-md rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 disabled:opacity-60"
         >
           {projects.length === 0 ? (
             <option value="">No projects</option>
@@ -316,15 +377,6 @@ export default function Kanban() {
         />
       ) : null}
 
-      {dragError ? (
-        <ErrorBanner
-          tone="warning"
-          message={dragError}
-          onRetry={() => setDragError('')}
-          retryLabel="Dismiss"
-        />
-      ) : null}
-
       {loadingIssues && projectId ? (
         <div className="grid animate-pulse grid-cols-1 gap-4 md:grid-cols-3">
           {[1, 2, 3].map((i) => (
@@ -336,7 +388,7 @@ export default function Kanban() {
       {!loadingIssues && projectId ? (
         <DndContext
           sensors={sensors}
-          collisionDetection={closestCorners}
+          collisionDetection={columnsOnlyCollision}
           onDragStart={handleDragStart}
           onDragEnd={handleDragEnd}
           onDragCancel={() => setActiveIssue(null)}
@@ -348,6 +400,9 @@ export default function Kanban() {
                 columnId={columnId}
                 title={COLUMN_META[columnId].title}
                 issues={columns[columnId]}
+                dotColor={COLUMN_META[columnId].dot}
+                userId={userId}
+                userRole={userRole}
               />
             ))}
           </div>

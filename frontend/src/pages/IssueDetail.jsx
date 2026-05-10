@@ -11,6 +11,15 @@ import {
   statusLabelForIssue,
 } from '../utils/issueHelpers'
 
+function DetailField({ label, children }) {
+  return (
+    <div>
+      <dt className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">{label}</dt>
+      <dd className="mt-1">{children}</dd>
+    </div>
+  )
+}
+
 export default function IssueDetail() {
   const { issueId } = useParams()
   const { issue, loading, error, refetch } = useIssue(issueId)
@@ -39,13 +48,17 @@ export default function IssueDetail() {
   }
 
   return (
-    <div className="mx-auto max-w-3xl space-y-8">
+    <div className="mx-auto max-w-3xl space-y-6">
+      {/* Breadcrumb */}
       <div className="flex flex-wrap items-center gap-3 text-sm">
         <Link
           to={issuesListPath}
-          className="inline-flex items-center gap-1 font-medium text-indigo-600 hover:text-indigo-700"
+          className="inline-flex items-center gap-1.5 font-medium text-slate-500 transition hover:text-indigo-600"
         >
-          <span aria-hidden>←</span> All issues
+          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+          </svg>
+          All issues
         </Link>
       </div>
 
@@ -57,15 +70,14 @@ export default function IssueDetail() {
 
       {!loading && issue ? (
         <>
-          <article className="rounded-2xl border border-slate-200/80 bg-white p-6 shadow-sm sm:p-8">
-            <h1 className="text-2xl font-semibold tracking-tight text-slate-900">
-              {issue.title ?? 'Untitled issue'}
-            </h1>
+          <article className="overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-sm">
+            <div className="p-6 sm:p-8">
+              <h1 className="text-xl font-bold tracking-tight text-slate-900 sm:text-2xl">
+                {issue.title ?? 'Untitled issue'}
+              </h1>
 
-            <dl className="mt-6 grid gap-4 sm:grid-cols-2">
-              <div>
-                <dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Status</dt>
-                <dd className="mt-1">
+              <dl className="mt-6 grid gap-4 sm:grid-cols-3">
+                <DetailField label="Status">
                   <span
                     className={cn(
                       'inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset',
@@ -74,11 +86,8 @@ export default function IssueDetail() {
                   >
                     {statusLabelForIssue(issue)}
                   </span>
-                </dd>
-              </div>
-              <div>
-                <dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">Priority</dt>
-                <dd className="mt-1">
+                </DetailField>
+                <DetailField label="Priority">
                   <span
                     className={cn(
                       'inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset',
@@ -87,27 +96,31 @@ export default function IssueDetail() {
                   >
                     {issue.priority ?? '—'}
                   </span>
-                </dd>
-              </div>
-              <div className="sm:col-span-2">
-                <dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">
-                  Assigned user
-                </dt>
-                <dd className="mt-1 text-sm font-medium text-slate-900">{assignedLabel}</dd>
-              </div>
-            </dl>
+                </DetailField>
+                <DetailField label="Assignee">
+                  <div className="flex items-center gap-2">
+                    {assignedLabel !== 'Unassigned' && (
+                      <div className="flex h-6 w-6 items-center justify-center rounded-full bg-indigo-100 text-[9px] font-bold text-indigo-700">
+                        {assignedLabel.split(/\s+/).map((p) => p[0]).join('').slice(0, 2).toUpperCase()}
+                      </div>
+                    )}
+                    <span className="text-sm font-medium text-slate-900">{assignedLabel}</span>
+                  </div>
+                </DetailField>
+              </dl>
+            </div>
 
-            <div className="mt-8 border-t border-slate-100 pt-8">
-              <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-500">Description</h2>
+            <div className="border-t border-slate-100 p-6 sm:p-8">
+              <h2 className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Description</h2>
               <div className="mt-3 whitespace-pre-wrap text-sm leading-relaxed text-slate-700">
                 {issue.description?.trim() ? issue.description : (
-                  <span className="text-slate-400">No description provided.</span>
+                  <span className="italic text-slate-400">No description provided.</span>
                 )}
               </div>
             </div>
           </article>
 
-          <Comments issueId={issueId} title="Comments" />
+          <Comments issueId={issueId} title="Discussion" />
         </>
       ) : null}
     </div>

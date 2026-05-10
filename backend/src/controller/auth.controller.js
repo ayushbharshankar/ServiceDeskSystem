@@ -3,7 +3,6 @@ import bcrypt from 'bcryptjs';
 import pool from '../db.js';
 import generateToken from '../util/token.js';
 
-// ── POST /api/auth/register ──────────────────────────────────────────
 const register = async (req, res) => {
   try {
     const { full_name, email, password, role } = req.body;
@@ -12,13 +11,11 @@ const register = async (req, res) => {
       return res.status(400).json({ message: 'full_name, email, and password are required' });
     }
 
-    // Check if user already exists
     const existing = await pool.query('SELECT user_id FROM users WHERE email = $1', [email]);
     if (existing.rows.length > 0) {
       return res.status(409).json({ message: 'User with this email already exists' });
     }
 
-    // Hash password
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
 
@@ -51,7 +48,6 @@ const register = async (req, res) => {
   }
 };
 
-// ── POST /api/auth/login ─────────────────────────────────────────────
 const login = async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -90,14 +86,12 @@ const login = async (req, res) => {
   }
 };
 
-// ── POST /api/auth/logout ────────────────────────────────────────────
 const logout = async (req, res) => {
   // JWT is stateless — client simply discards the token.
   // This endpoint exists for API completeness.
   res.status(200).json({ message: 'Logged out successfully' });
 };
 
-// ── GET /api/auth/me ─────────────────────────────────────────────────
 const me = async (req, res) => {
   try {
     const { rows } = await pool.query(

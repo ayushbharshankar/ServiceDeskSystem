@@ -9,7 +9,7 @@ import IssuesTable from '../components/issues/IssuesTable'
 import ErrorBanner from '../components/ui/ErrorBanner'
 import PageHeader from '../components/ui/PageHeader'
 import { useIssuesList } from '../hooks/useIssuesList'
-import { useProjectsList } from '../hooks/useProjectsList'
+import { useProjects } from '../context/ProjectsContext'
 import { issueService } from '../services/issueService'
 import { getErrorMessage } from '../utils/errorMessage'
 import { issuePriority, issueStatus, rawIssueId } from '../utils/issueHelpers'
@@ -20,7 +20,7 @@ export default function Issues() {
   const projectId = projectIdParam ?? ''
 
   const { projects, loading: loadingProjects, error: projectsError, refetch: refetchProjects } =
-    useProjectsList()
+    useProjects()
   const {
     issues,
     loading: loadingIssues,
